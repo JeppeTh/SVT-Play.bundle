@@ -3,8 +3,13 @@ import re, htmlentitydefs
 
 # Global constants
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-VERSION="7"
+VERSION="8"
 PLUGIN_PREFIX	= "/video/svt"
+
+#WLPS
+WLPS_SITE = "http://api.welovepublicservice.se"
+WLPS_INDEX = WLPS_SITE + "/v1/showsimple/"
+WLPS_EPISODES = WLPS_SITE + "/v1/episode/?show=%s&format=json"
 
 # URLs
 URL_SITE = "http://www.svtplay.se"
@@ -90,8 +95,6 @@ def Start():
         Dict[SHOW_SUM] = {}
         Dict.Save()
 
-    Thread.Create(HarvestShowData)
-
 # Menu builder methods
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 @handler('/video/svt', TEXT_TITLE, thumb=ICON, art=ART)
@@ -131,26 +134,6 @@ def GetCategories(prevTitle):
 
     return catList
 
-def GetCategoryShows(prevTitle, key):
-    pageElement = HTML.ElementFromURL(URL_INDEX)
-    xpath = "//li[@data-category='%s']//a[@class='playAlphabeticLetterLink']" % categories[key]
-    programLinks = pageElement.xpath(xpath)
-    showsList = ObjectContainer(title1=prevTitle, title2=key)
-    for s in CreateShowList(programLinks, key):
-        showsList.add(s)
-
-    return showsList
-
-def GetAllShowsCombined():
-    svt = GetIndexShows("")
-    oa = GetOAIndex("")
-    list = []
-    for s in svt.objects:
-        list.append(s)
-    for s in oa.objects:
-        list.append(s)
-    return list
-
 #------------ SEARCH ---------------------
 def SearchShow (query):
     query = unicode(query)
@@ -173,166 +156,37 @@ def SearchShow (query):
 #------------ SHOW FUNCTIONS ---------------------
 def GetIndexShows(prevTitle):
     showsList = ObjectContainer(title1=prevTitle, title2=TEXT_INDEX_SHOWS)
-    pageElement = HTML.ElementFromURL(URL_INDEX)
-    programLinks = pageElement.xpath("//a[@class='playAlphabeticLetterLink']")
+    json = JSON.ObjectFromURL(WLPS_INDEX)
 
-    for s in CreateShowList(programLinks, TEXT_INDEX_SHOWS):
-        showsList.add(s)
+    for show in json['objects']:
+        showObj = CreateShowObject(show, TEXT_INDEX_SHOWS)
+        showsList.add(showObj)
 
     return showsList
 
-# This function wants a <a>..</a> tag list
-def CreateShowList(programLinks, parentTitle=None):
+def CreateShowObject(jsonShow, parentTitle=None):
 
-    showsList = []
+    show = DirectoryObject()
+    showName = jsonShow['title']
+    showUrl = WLPS_EPISODES % jsonShow['id']
+    show.title = showName
+    #show.thumb = ""
+    #show.summary = ""
+    show.key = Callback(GetShowEpisodes, prevTitle=parentTitle, showUrl=showUrl, showName=showName)
 
-    for programLink in programLinks:
-        try:
-            showUrl = URL_SITE + programLink.get("href")
-            showName = programLink.xpath("./text()")[0].strip()
-            show = DirectoryObject()
-            show.title = showName
-            show.key = Callback(GetShowEpisodes, prevTitle=parentTitle, showUrl=showUrl, showName=showName)
-            show.thumb = GetShowImgUrl(showName)
-            show.summary = GetShowSummary(showName)
-            showsList.append(show)
-        except: 
-            Log("Error creating show: "+programLink.get("href"))
-            pass
+    return show
 
-    return showsList     
-
-def GetShowSummary(showName):
-    d = Dict[SHOW_SUM]
-    showName = unicode(showName)
-    if showName in d:
-        return d[showName][1]
-    return ""
-
-def GetShowImgUrl(showName):
-    d = Dict[SHOW_SUM]
-    showName = unicode(showName)
-    if showName in d:
-        return d[showName][3]
-    return None
-
-def HarvestShowData():
-    pageElement = HTML.ElementFromURL(URL_INDEX)
-    programLinks = pageElement.xpath("//a[@class='playAlphabeticLetterLink']")
-    json_obj = JSON.ObjectFromURL(URL_PROGRAMS)
-
-    for programLink in programLinks:
-        try:
-            showURL = URL_SITE + programLink.get("href")
-            showName = unicode(programLink.xpath("./text()")[0].strip())
-
-            d = Dict[SHOW_SUM]
-            if showName in d:
-                td = Datetime.Now() - d[showName][2]
-                if td.days < 30:
-                    Log("Got cached data for %s" % showName)
-                    continue
-            else:
-                Log("no hit for %s" % showName)
-
-            pageElement = HTML.ElementFromURL(showURL)
-
-            #Find the summary for the show
-            sum = pageElement.xpath("//div[@class='playBoxConnectedToVideoAside playJsShowMoreSubContainer']/p/text()")
-            summary = ""
-            if (len(sum) > 0):
-                summary = unicode(sum[0].strip())
-
-            imgUrl = ""
-            try:
-                print json_obj
-                for show in json_obj:
-                    if showName == show['title']:
-                        # I need to unicode it to save it in the Dict
-                        imgUrl = unicode(show['thumbnail'])
-            except:
-                Log("Error looking for image for show %s" % showName)
-                pass
-
-            t = Datetime.TimestampFromDatetime(Datetime.Now())
-            d[showName] = (showName, summary, Datetime.Now(), imgUrl)
-
-            #To prevent this thread from stealing too much network time
-            #we force it to sleep for every new page it loads
-            Dict[SHOW_SUM] = d
-            Dict.Save()
-            Thread.Sleep(1)
-        except:
-            Log("Error harvesting show data: " + programLink.get('href'))
-            pass
-
-def MakeShowContainer(epUrls, title1="", title2="", sort=False):
+def MakeShowContainer(showUrl, title1="", title2="", sort=False):
+    json = JSON.ObjectFromURL(showUrl)
     resultList  = ObjectContainer(title1=title1, title2=title2)
-    epList      = ObjectContainer()
-    clipUrls    = []
-
-    for epUrl in epUrls:
-        if "/klipp" in epUrl:
-            clipUrls.append(epUrl)
-        elif "/video" in epUrl:
-            epList.add(GetEpisodeObject(epUrl))
-
-    if sort == True:
-        sortOnAirData(epList)
-
-    for ep in epList.objects:
-        resultList.add(ep)
-
-    if len(clipUrls) > 0:
-        resultList.add(MakeClipsContainer(clipUrls, title2))
+    
+    for ep in json['objects']:
+        resultList.add(GetEpisodeObject(ep, title1))
 
     return resultList
 
-def MakeClipsContainer(clipUrls, title1):
-    clip       = DirectoryObject()
-    clip.title = TEXT_CLIP
-    clip.key   = Callback(ReturnClips,urls=clipUrls,title1=title1, title2=TEXT_CLIP)
-    clip.thumb = R(ICON)
-    clip.art   = R(ART)
-    return clip
-
-def ReturnClips(urls=None, title1="", title2=""):
-    clipList = ObjectContainer(title1=title1, title2=title2)
-    for url in urls:
-        clipList.add(GetEpisodeObject(url))
-    sortOnAirData(clipList)
-    return clipList
-
-def GetShowUrls(showUrl=None, maxEp=500, addClips=True):
-
-    suffix = "sida=1&antal=%d" % maxEp
-    page   = HTML.ElementFromURL(showUrl)
-    link   = page.xpath("//a[@class='playShowMoreButton playButton ']/@data-baseurl")
-
-    # If we can find the page with all episodes in, use it
-    if len(link) > 0 and '/klipp' not in link[0]: 
-        epUrls = GetShowUrlsHelp(URL_SITE + link[0] + suffix)
-        i = 1;
-        while (i < len(link)):
-            if addClips and '/klipp' in link[i]:
-                epUrls = epUrls + GetShowUrlsHelp(URL_SITE + link[i] + suffix)
-            i = i + 1
-    else: #Use the episodes on the base page
-        epUrls = page.xpath("//div[@class='playDisplayTable']/a/@href")
-
-    if addClips:
-        return ([URL_SITE + url for url in epUrls if "/video" in url] +
-                [URL_SITE + url for url in epUrls if "/klipp" in url])
-    else:
-        return [URL_SITE + url for url in epUrls if "/video" in url]
-
-def GetShowUrlsHelp(url):
-    epPage = HTML.ElementFromURL(url)
-    return epPage.xpath("//div[@class='playDisplayTable']/a/@href")
-
 def GetShowEpisodes(prevTitle=None, showUrl=None, showName=""):
-    epUrls = GetShowUrls(showUrl)
-    return MakeShowContainer(epUrls, prevTitle, showName, False)
+    return MakeShowContainer(showUrl, prevTitle, showName, False)
 
 def GetLatestNews(prevTitle):
     epUrls = GetShowUrls(showUrl=URL_LATEST_NEWS, maxEp=15, addClips=False)
@@ -387,47 +241,27 @@ def GetLiveShows(prevTitle):
     return showsList
 
 #------------ EPISODE FUNCTIONS ---------------------
-def GetEpisodeObject(url):
+def GetEpisodeObject(jsonEp, show):
 
-    try:
-       page = HTML.ElementFromURL(url)
+    url = jsonEp['url']
+    show = show
+    title = jsonEp['title']
+    description = jsonEp['description']
+    duration = 10 * 60 * 1000
+    thumb = jsonEp['thumbnail_url']
+    art = thumb
+    air_date = None
 
-       show = page.xpath("//h1[@class='playVideoBoxHeadline-Inner']/text()")[0]
-       title = unescapeHTML(page.xpath('//meta[@property="og:title"]/@content')[0].split(' | ')[0])
-       description = unescapeHTML(page.xpath('//meta[@property="og:description"]/@content')[0])
-
-       try:
-           air_date = page.xpath("//div[@class='playBoxConnectedToVideoMain']//time")[0].get("datetime")
-           air_date = air_date.split('+')[0] #cut off timezone info as python can't parse this
-           air_date = Datetime.ParseDate(air_date)
-       except:
-           Log.Exception("Error converting airdate")
-           air_date = None
-
-       try:
-           if "klipp" in url:
-               duration = page.xpath("//div[@class='playVideoInfo']//span//strong/../text()")[2].split()
-           else:
-               duration = page.xpath("//div[@class='playVideoInfo']//span//strong/../text()")[3].split()
-           duration = duration2sec(duration) * 1000 #millisecs
-       except:
-           duration = None
-
-       thumb =  page.xpath("//div[@class='playVideoBox']//a[@id='player']//img/@src")[0]
-
-       return EpisodeObject(
-               url = url,
-               show = show,
-               title = title,
-               summary = description,
-               duration = duration,
-               thumb = thumb,
-               art = thumb,
-               originally_available_at = air_date
-             )
-
-    except:
-        Log.Exception("An error occurred while attempting to retrieve the required meta data.")
+    return EpisodeObject(
+           url = url,
+           show = show,
+           title = title,
+           summary = description,
+           duration = duration,
+           thumb = thumb,
+           art = thumb,
+           originally_available_at = air_date
+         )
 
 #------------OPEN ARCHIVE FUNCTIONS ---------------------
 def GetOAIndex(prevTitle):
@@ -507,44 +341,3 @@ def GetOAEpisodeObject(url):
     except:
         Log(VERSION)
         Log("Exception occurred parsing url " + url)
-
-#------------MISC FUNCTIONS ---------------------
-def unescapeHTML(text):
-    def fixup(m):
-        text = m.group(0)
-        if text[:2] == "&#":
-            # character reference
-            try:
-                if text[:3] == "&#x":
-                    return unichr(int(text[3:-1], 16))
-                else:
-                    return unichr(int(text[2:-1]))
-            except ValueError:
-                pass
-        else:
-            # named entity
-            try:
-                text = unichr(htmlentitydefs.name2codepoint[text[1:-1]])
-            except KeyError:
-                pass
-        return text # leave as is
-    return re.sub("&#?\w+;", fixup, text)
-
-def sortOnAirData(Objects):
-    for obj in Objects.objects:
-        if obj.originally_available_at == None:
-            return Objects.objects.reverse()
-    return Objects.objects.sort(key=lambda obj: (obj.originally_available_at,obj.title))
-
-def duration2sec(durationList):
-    i   = 0
-    sec = 0
-    while (i < len(durationList)):
-        if durationList[i+1] == "h":
-            sec = sec + (int(durationList[i]) * 3600)
-        elif durationList[i+1] == "min":
-            sec = sec + (int(durationList[i]) * 60)
-        elif durationList[i+1] == "sek":
-            sec = sec + int(durationList[i])
-        i = i + 2
-    return int(sec)
