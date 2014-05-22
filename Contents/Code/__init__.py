@@ -8,7 +8,7 @@ PLUGIN_PREFIX = "/video/svt"
 # URLs
 URL_SITE = "http://www.svtplay.se"
 URL_INDEX = URL_SITE + "/program"
-URL_CHANNELS = URL_SITE + "/kanaler"
+URL_CANNELS = URL_SITE + "/kanaler"
 URL_PROGRAMS = URL_SITE + "/ajax/sok/forslag.json"
 URL_SEARCH      = URL_SITE + "/sok?q=%s"
 
@@ -92,11 +92,11 @@ def Start():
 def MainMenu():
 
     menu = ObjectContainer(title1=TEXT_TITLE)
-    menu.add(DirectoryObject(key=Callback(GetIndexShows, prevTitle=TEXT_TITLE), title=TEXT_INDEX_SHOWS,thumb=R('main_index.png')))
-    menu.add(DirectoryObject(key=Callback(GetChannels, prevTitle=TEXT_TITLE), title=TEXT_CHANNELS,thumb=R('main_kanaler.png')))
-    menu = AddSections(menu)
     menu.add(DirectoryObject(key=Callback(GetRecommendedEpisodes, prevTitle=TEXT_TITLE), title="Rekommenderat", thumb=R('main_rekommenderat.png')))
-    menu.add(DirectoryObject(key=Callback(GetCategories, prevTitle=TEXT_TITLE), title="Kategorier", thumb=R('main_kategori.png')))
+    menu = AddSections(menu)
+    menu.add(DirectoryObject(key=Callback(GetCategories, prevTitle=TEXT_TITLE), title=TEXT_CATEGORIES, thumb=R('main_kategori.png')))
+    menu.add(DirectoryObject(key=Callback(GetChannels, prevTitle=TEXT_TITLE), title=TEXT_CHANNELS,thumb=R('main_kanaler.png')))
+    menu.add(DirectoryObject(key=Callback(GetAllIndex, prevTitle=TEXT_TITLE), title=TEXT_INDEX_ALL,thumb=R('icon-default.png')))
     menu.add(DirectoryObject(key=Callback(GetAllIndex, prevTitle=TEXT_TITLE), title=TEXT_INDEX_ALL,thumb=R('icon-default.png')))
     menu.add(InputDirectoryObject(key=Callback(Search),title = TEXT_SEARCH, prompt=TEXT_SEARCH, thumb = R('search.png')))
     Log(VERSION)
@@ -335,10 +335,6 @@ def ReturnSearchHits(url, tag, result, directoryTitle, createDirectory=False):
                     art = ThumbToArt(thumb),
                     originally_available_at = air_date))
         return oc
-        # epList = GetEpisodeObjects(epList, page.xpath(xpath), None, stripShow=False)
-        # sortOnAirData(epList)
-        # epList.objects.sort(key=lambda obj: obj.show)
-        # return epList
 
 def CreateDirObject(name, key, thumb=R(ICON), summary=None):
     myDir         = DirectoryObject()
@@ -775,8 +771,6 @@ def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None,
             tmp = title.split(" - ", 1)
             if len(tmp) > 1:
                 show = tmp[0]
-                if stripShow:
-                    title = tmp[1]
 
         if titleFilter:
             if not (titleFilter in title):
