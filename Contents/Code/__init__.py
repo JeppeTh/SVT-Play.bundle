@@ -459,6 +459,7 @@ def MakeShowContainer(showUrl, title1="", title2="", sort=False, addClips=True, 
         # In case specific season is requested, title2 is set to name of the Season. Show is found in title1
         showName = title1
     epList = GetEpisodeObjects(epList, articles, showName, stripShow=sort, seasonFilter=seasonFilter)
+
     if addClips:
         page = HTML.ElementFromURL(showUrl)
         if len(page.xpath("//div[@id='play_js-tabpanel-more-clips']//article")) > 0:
