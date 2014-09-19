@@ -771,6 +771,8 @@ def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None,
             tmp = title.split(" - ", 1)
             if len(tmp) > 1:
                 show = tmp[0]
+                if stripShow:
+                    title = tmp[1]
 
         if titleFilter:
             if not (titleFilter in title):
