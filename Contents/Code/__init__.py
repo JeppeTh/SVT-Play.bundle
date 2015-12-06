@@ -111,6 +111,8 @@ def AddSections(menu):
         xpath = "//section[contains(concat(' ',@class,' '),' play_js-hovered-list')]"
         index = 0
         for section in pageElement.xpath(xpath):
+            if "play_is-hidden" in section.get('class'):
+                continue
             title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/span/text()")
             if (len(title) == 0):
                 title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/text()")
@@ -177,7 +179,7 @@ def GetSectionShows(url, prevTitle, title):
         articles = page.xpath("//div[@id='playJs-title-pages']//article")
     for article in articles:
         showUrl = FixLink(article.xpath("./a/@href")[0])
-        if re.search("/(klipp|video)/", showUrl):
+        if IsPlayable(showUrl):
             # Episode amongst shows - skip it.
             continue
                          
@@ -530,7 +532,7 @@ def GetRecommendedEpisodes(prevTitle=None):
     page = HTML.ElementFromURL(URL_SITE)
     articles = page.xpath("//section[@id='recommended-videos']//article")
     for article in articles:
-        url = FixLink(article.xpath("./a/@href")[0])
+        url = RedirectedUrl(FixLink(article.xpath("./a/@href")[0]))
         show = None
         title = GetFirstNonEmptyString(article.xpath(".//span[@class='play_carousel-caption__title-inner']/text()"))
         summary = GetFirstNonEmptyString(article.xpath("./a/span/span[2]/text()"))
@@ -540,7 +542,7 @@ def GetRecommendedEpisodes(prevTitle=None):
         if len(tmp) > 1:
             show = tmp[0]
 
-        if re.search("/(klipp|video)/", url):
+        if IsPlayable(url):
             oc.add(EpisodeObject(
                     url = url,
                     show = show,
@@ -1074,6 +1076,21 @@ def FixLink(link, prefix=URL_SITE):
         return prefix + link
     else:
         return prefix + "/" + link
+
+def IsPlayable(url):
+    return re.search("/(klipp|video)/", url)
+
+def RedirectedUrl(url):
+    if IsPlayable(url):
+        # No need to redirect
+        return url
+    try:
+        HTTP.Request(url, follow_redirects=False).headers
+    except Ex.RedirectError, e:
+        return e.location
+    except Exception as e:
+        pass
+    return url
 
 def sortOnIndex(Objects):
     for obj in Objects.objects:
