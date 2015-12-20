@@ -108,7 +108,7 @@ def AddSections(menu):
 
     try:
         pageElement = HTML.ElementFromURL(URL_SITE)
-        xpath = "//section[contains(concat(' ',@class,' '),' play_js-hovered-list')]"
+        xpath = "//div[@class='play_videolist-group']"
         index = 0
         for section in pageElement.xpath(xpath):
             if "play_is-hidden" in section.get('class'):
@@ -130,22 +130,23 @@ def AddSections(menu):
             except:
                 pass
 
-            menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, index=index, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(img)))
+            url = FixLink(section.xpath(".//h1[@class='play_videolist-section-header__header']/./a")[0].get("href"))
+            menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, url=url, index=index, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(img)))
             index = index + 1
     except Exception as e:
         Log.Exception("AddSections failed:%s" % e)
     return menu
 
-@route(PLUGIN_PREFIX + '/GetSectionEpisodes', index=int)
-def GetSectionEpisodes(index, prevTitle, title):
+@route(PLUGIN_PREFIX + '/GetSectionEpisodes', url=str, index=int)
+def GetSectionEpisodes(url, index, prevTitle, title):
     oc = ObjectContainer(title1=unicode(prevTitle), title2=unicode(title))
 
-    pageElement = HTML.ElementFromURL(URL_SITE, cacheTime=0)
-    xpath = "//section[contains(concat(' ',@class,' '),' play_js-hovered-list')]"
-    section = pageElement.xpath(xpath)[index]
-    articles = section.xpath(".//article")
+    pageElement = HTML.ElementFromURL(url, cacheTime=0)
+    # xpath = "//div[@class='play_videolist-group']"
+    # section = pageElement.xpath(xpath)[index]
+    articles = pageElement.xpath(".//article")
     if articles[0].get("data-title"):
-        oc = GetEpisodeObjects(oc, articles, showName=None)
+        oc = GetEpisodeObjects(oc, articles, showName=None, isLive="/live" in url)
     else:
         for article in articles:
             url = FixLink(article.xpath("./a/@href")[0])
@@ -642,28 +643,32 @@ def GetLiveShowTitle(a):
 
 #------------ EPISODE FUNCTIONS ---------------------
 # Excpects a list of arcticle tags
-def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None, seasonFilter=None):
+def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None, seasonFilter=None, isLive=False):
 
     for article in articles:
+        url = FixLink(article.xpath(".//a/@href")[0])
         if stripShow:
             if len(article.xpath("./div/div[contains(concat(' ',@class,' '),'countdown play_live-countdown')]")) > 0:
                 continue
             title, summary, availability, duration, air_date = GetShowEpisodeData(article, showName)
         else:
-            if IsLive(article):
+            if isLive or IsLive(article):
+                if article.get("data-broadcastended") == "true":
+                    continue
                 title = GetLiveShowTitle(article)
             else:
                 title = article.get("data-title")
 
+            summary = ""
             # Get the longer description when available
-            try: 
-                if not URL_OA_LABEL in url and len(article.get("data-description")) > 0:
-                    summary = unescapeHTML(article.xpath("./a/@title")[0])
-                else:
-                    summary = ""
-            except Exception as e:
-                Log("JTDEBUG new summary failed:%s" % e)
-                summary = ""
+            # try: 
+            #     if not URL_OA_LABEL in url and len(article.get("data-description")) > 0:
+            #         summary = unescapeHTML(article.xpath("..//span[@class='play_videolist-element__title']/text()"))
+            #     else:
+            #         summary = ""
+            # except Exception as e:
+            #     Log("JTDEBUG new summary failed:%s" % e)
+            #     summary = ""
             if len(summary) == 0 and article.get("data-description"):
                 summary = unescapeHTML(article.get("data-description"))
 
@@ -674,7 +679,6 @@ def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None,
                 air_date = article.get("data-published")
 
         # Common part
-        url = FixLink(article.xpath(".//a/@href")[0])
         thumb = FixLink(article.xpath(".//img/@src")[0].strip())
         try: 
             showName = showName.decode('utf-8')
