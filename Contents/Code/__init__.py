@@ -96,6 +96,7 @@ def MainMenu():
     menu.add(DirectoryObject(key=Callback(GetChannels, prevTitle=TEXT_TITLE), title=TEXT_CHANNELS,thumb=R('main_kanaler.png')))
     menu = AddSections(menu)
     menu.add(DirectoryObject(key=Callback(GetRecommendedEpisodes, prevTitle=TEXT_TITLE), title="Rekommenderat", thumb=R('main_rekommenderat.png')))
+    menu.add(DirectoryObject(key=Callback(GetCategories, prevTitle=TEXT_TITLE), title="Kategorier", thumb=R('main_kategori.png')))
     menu.add(DirectoryObject(key=Callback(GetAllIndex, prevTitle=TEXT_TITLE), title=TEXT_INDEX_ALL,thumb=R('icon-default.png')))
     menu.add(InputDirectoryObject(key=Callback(Search),title = TEXT_SEARCH, prompt=TEXT_SEARCH, thumb = R('search.png')))
     Log(VERSION)
@@ -109,7 +110,6 @@ def AddSections(menu):
     try:
         pageElement = HTML.ElementFromURL(URL_SITE)
         xpath = "//div[@class='play_videolist-group']"
-        index = 0
         for section in pageElement.xpath(xpath):
             if "play_is-hidden" in section.get('class'):
                 continue
@@ -123,40 +123,19 @@ def AddSections(menu):
                 title[i] = title[i].strip()
                 i = i+1
             title = unicode('/'.join(title))
-
-            img = ICON
-            try:
-                img = sec2thumb[title]
-            except:
-                pass
-
             url = FixLink(section.xpath(".//h1[@class='play_videolist-section-header__header']/./a")[0].get("href"))
-            menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, url=url, index=index, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(img)))
-            index = index + 1
+            menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, url=url, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(ICON)))
     except Exception as e:
         Log.Exception("AddSections failed:%s" % e)
     return menu
 
-@route(PLUGIN_PREFIX + '/GetSectionEpisodes', url=str, index=int)
-def GetSectionEpisodes(url, index, prevTitle, title):
+@route(PLUGIN_PREFIX + '/GetSectionEpisodes', url=str)
+def GetSectionEpisodes(url, prevTitle, title):
     oc = ObjectContainer(title1=unicode(prevTitle), title2=unicode(title))
 
     pageElement = HTML.ElementFromURL(url, cacheTime=0)
-    # xpath = "//div[@class='play_videolist-group']"
-    # section = pageElement.xpath(xpath)[index]
     articles = pageElement.xpath(".//article")
-    if articles[0].get("data-title"):
-        oc = GetEpisodeObjects(oc, articles, showName=None, isLive="/live" in url)
-    else:
-        for article in articles:
-            url = FixLink(article.xpath("./a/@href")[0])
-            thumb = FixLink(article.xpath(".//img/@src")[0])
-            title = unicode(article.xpath("./a/@title")[0].strip())
-            # Nasty hack for OA in categories...
-            if url == URL_SITE + "/%s" % URL_OA_LABEL:
-                oc.add(DirectoryObject(key=Callback(GetOAIndex, prevTitle=prevTitle), title=title, thumb=thumb))
-            else:
-                oc.add(DirectoryObject(key=Callback(GetSectionShows, url=url, prevTitle=prevTitle, title=title), title=title, thumb=thumb))
+    oc = GetEpisodeObjects(oc, articles, showName=None, isLive="/live" in url)
 
     return oc
 
@@ -531,14 +510,17 @@ def GetRecommendedEpisodes(prevTitle=None):
     oc = ObjectContainer(title1=prevTitle, title2=TEXT_RECOMMENDED)
 
     page = HTML.ElementFromURL(URL_SITE)
-    articles = page.xpath("//section[@id='recommended-videos']//article")
+    articles = page.xpath("//div [@class='play_display-window']//article")
     for article in articles:
         url = RedirectedUrl(FixLink(article.xpath("./a/@href")[0]))
         show = None
-        title = GetFirstNonEmptyString(article.xpath(".//span[@class='play_carousel-caption__title-inner']/text()"))
-        summary = GetFirstNonEmptyString(article.xpath("./a/span/span[2]/text()"))
+        title = GetFirstNonEmptyString(article.xpath(".//span[contains(concat(' ',@class,' '),'play_display-window__title ')]/text()"))
+
+
+        summary = GetFirstNonEmptyString(article.xpath(".//span[contains(concat(' ',@class,' '),'play_display-window__text ')]/text()"))
         if summary: summary = unescapeHTML(summary)
-        thumb = FixLink(article.xpath(".//img/@data-imagename")[0].replace("_imax", ""))
+        # thumb = article.xpath(".//img/@data-imagename")[0].decode('utf-8') 
+        thumb = FixLink(article.xpath(".//img/@src")[0].replace("_imax", ""))
         tmp = title.split(" - ", 1)
         if len(tmp) > 1:
             show = tmp[0]
@@ -555,6 +537,28 @@ def GetRecommendedEpisodes(prevTitle=None):
             # Assume Show
             oc.add(CreateShowDirObject(title, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=url, showName=title)))
 
+    return oc
+
+@route(PLUGIN_PREFIX + '/GetCategories')
+def GetCategories(prevTitle=None):
+    try:
+        oc = ObjectContainer(title1=prevTitle, title2='Kategorier')
+        page = HTML.ElementFromURL(URL_SITE)
+        articles = page.xpath("//article[contains(concat(' ',@class,' '),'play_promotion-item ')]")
+        for article in articles:
+            title = article.xpath(".//img")[0].get('alt')
+            url = FixLink(article.xpath(".//a")[0].get("href"))
+            try:
+                thumb = R(sec2thumb[title])
+            except:
+                thumb = article.xpath(".//img")[0].get('src')
+            # Nasty hack for OA in categories...
+            if url == URL_SITE + "/%s" % URL_OA_LABEL:
+                oc.add(DirectoryObject(key=Callback(GetOAIndex, prevTitle=prevTitle), title=title, thumb=thumb))
+            else:
+                oc.add(DirectoryObject(key=Callback(GetSectionShows, url=url, prevTitle=prevTitle, title=title), title=title, thumb=thumb))
+    except Exception as e:
+        Log.Exception("GetCategories failed:%s" % e)
     return oc
 
 def GetFirstNonEmptyString(stringList):
