@@ -430,7 +430,19 @@ def MakeShowContainer(showUrl, title1="", title2="", sort=False, addClips=True, 
             if not skipEp:
                 resultList.add(ep)
         return resultList
+    elif len(epList) == 0:
+        # Try if show instead
+        epList = GetShows(epList, title1, showUrl)
+    
     return epList
+
+def GetShows(oc, prevTitle, url):
+    for article in HTML.ElementFromURL(url).xpath("//article"):
+        showUrl  = FixLink(article.xpath("./a/@href")[0])
+        showName = article.xpath(".//span[@class='play_videolist-element__title-text']/text()")[0]
+        oc.add(CreateShowDirObject(showName, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=showName)))
+
+    return oc
 
 def GetEpisodeArticles(url):
     page = HTML.ElementFromURL(url);
