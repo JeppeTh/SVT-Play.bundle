@@ -109,7 +109,7 @@ def AddSections(menu):
 
     try:
         pageElement = HTML.ElementFromURL(URL_SITE)
-        xpath = "//div[@class='play_videolist-group']"
+        xpath = "//section[@class='play_videolist-group']"
         for section in pageElement.xpath(xpath):
             if "play_is-hidden" in section.get('class'):
                 continue
@@ -439,7 +439,7 @@ def MakeShowContainer(showUrl, title1="", title2="", sort=False, addClips=True, 
 def GetShows(oc, prevTitle, url):
     for article in HTML.ElementFromURL(url).xpath("//article"):
         showUrl  = FixLink(article.xpath("./a/@href")[0])
-        showName = article.xpath(".//span[@class='play_videolist-element__title-text']/text()")[0]
+        showName = article.xpath(".//h3[@class='play_videolist-element__title']/span/text()")[0]
         oc.add(CreateShowDirObject(showName, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=showName)))
 
     return oc
@@ -522,14 +522,14 @@ def GetRecommendedEpisodes(prevTitle=None):
     oc = ObjectContainer(title1=prevTitle, title2=TEXT_RECOMMENDED)
 
     page = HTML.ElementFromURL(URL_SITE)
-    articles = page.xpath("//div [@class='play_display-window']//article")
+    articles = page.xpath("//section [@class='play_display-window']//article")
     for article in articles:
         url = RedirectedUrl(FixLink(article.xpath("./a/@href")[0]))
         show = None
-        title = GetFirstNonEmptyString(article.xpath(".//span[contains(concat(' ',@class,' '),'play_display-window__title ')]/text()"))
+        title = GetFirstNonEmptyString(article.xpath(".//h2[contains(concat(' ',@class,' '),'play_display-window__title ')]/text()"))
 
 
-        summary = GetFirstNonEmptyString(article.xpath(".//span[contains(concat(' ',@class,' '),'play_display-window__text ')]/text()"))
+        summary = GetFirstNonEmptyString(article.xpath(".//p[contains(concat(' ',@class,' '),'play_display-window__text ')]/text()"))
         if summary: summary = unescapeHTML(summary)
         # thumb = article.xpath(".//img/@data-imagename")[0].decode('utf-8') 
         thumb = FixLink(article.xpath(".//img/@src")[0].replace("_imax", ""))
@@ -738,6 +738,8 @@ def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None,
         episode = None
         if re.search("[Aa]vsnitt +[0-9]+", seasonInfo):
             episode = int(re.sub(".*[Aa]vsnitt +([0-9]+).*", "\\1", seasonInfo))
+        if not episode and re.search("[Dd]el +[0-9]+", summary):
+            episode = int(re.sub(".*[Dd]el +([0-9]+).*", "\\1", summary, flags=re.S))
 
         try:
            air_date = airDate2date(air_date)
