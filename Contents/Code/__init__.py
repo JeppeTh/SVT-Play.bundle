@@ -192,20 +192,16 @@ def Search (query):
     orgQuery = query
     query = String.Quote(query.replace(' ', '+'))
 
-    showXpath    = "//div[@id='search-titles']/div/div/article"
-    liveXpath    = "//div[@id='search-live']/div/div/article"
-    episodeXpath = "//div[@id='search-episodes']/div/div/article"
-    clipXpath    = "//div[@id='search-clips']/div/div/article"
-    oaXpath      = "//div[@id='search-oppetarkiv']/div/div/article"
     searchUrl    = URL_SEARCH % query
     showOc       = SearchShowTitle(orgQuery)
 
-    searchElement = HTML.ElementFromURL(searchUrl)
-    showHits      = len(searchElement.xpath(showXpath)) + len(showOc)
-    liveHits      = len(searchElement.xpath(liveXpath))
-    episodeHits   = len(searchElement.xpath(episodeXpath))
-    clipHits      = len(searchElement.xpath(clipXpath))
-    oaHits        = len(searchElement.xpath(oaXpath))
+    searchResult = GetSearchResult(searchUrl)
+
+    showHits      = len(searchResult['titles']) + len(showOc)
+    liveHits      = len(searchResult['live'])
+    episodeHits   = len(searchResult['episodes'])
+    clipHits      = len(searchResult['clips'])
+    oaHits        = len(searchResult['openArchive'])
 
     typeHits     = 0
     if showHits  > 0:
@@ -227,24 +223,30 @@ def Search (query):
     else:
         result = ObjectContainer(title1=TEXT_TITLE, title2=TEXT_SEARCH + " '%s'" % unicode(orgQuery))
         if liveHits > 0:
-            result = ReturnSearchHits(searchUrl, liveXpath, result, "%s(%i)" % (TEXT_LIVE,liveHits), typeHits > 1)
+            result = ReturnSearchHits(searchUrl, "live", result, "%s(%i)" % (TEXT_LIVE,liveHits), typeHits > 1)
         if episodeHits > 0:
-            result = ReturnSearchHits(searchUrl, episodeXpath, result, "%s(%i)" % (TEXT_EPISODES,episodeHits), typeHits > 1)
+            result = ReturnSearchHits(searchUrl, "episodes", result, "%s(%i)" % (TEXT_EPISODES,episodeHits), typeHits > 1)
         if clipHits > 0:
-            result = ReturnSearchHits(searchUrl, clipXpath, result, "%s(%i)" % (TEXT_CLIPS,clipHits), typeHits > 1)
+            result = ReturnSearchHits(searchUrl, "clips", result, "%s(%i)" % (TEXT_CLIPS,clipHits), typeHits > 1)
         if oaHits > 0:
-            result = ReturnSearchHits(searchUrl, oaXpath, result, "%s(%i)" % (TEXT_OA,oaHits), typeHits > 1)
+            result = ReturnSearchHits(searchUrl, "openArchive", result, "%s(%i)" % (TEXT_OA,oaHits), typeHits > 1)
         if showHits > 0:
-            result = ReturnSearchShows(searchUrl, showXpath, result, showOc)
+            result = ReturnSearchShows(searchUrl, result, showOc)
         return result
 
-def ReturnSearchShows(url, xpath, result, showOc=[]):
+def GetSearchResult(searchUrl):
+    searchResult = HTTP.Request(searchUrl).content.split('root["__svtplay"]')[1]
+    searchResult = JSON.ObjectFromString(re.sub("[^{]*(.+);$", "\\1", searchResult))
+    return searchResult['context']['dispatcher']['stores']['SearchStore']
 
-    showPage = HTML.ElementFromURL(url)
+def ReturnSearchShows(url, result, showOc=[]):
 
-    for article in showPage.xpath(xpath):
-        name = article.get("data-title")
-        showUrl = FixLink(article.xpath("./a/@href")[0])
+    showResult = GetSearchResult(url)['titles']
+
+    for show in showResult:
+        # Log("JTDEBUG %r" % article.get("data-title"))
+        name = trim(show['programTitle'])
+        showUrl = FixLink(show['contentUrl'])
         key = Callback(GetShowEpisodes, prevTitle=TEXT_TITLE, showUrl=showUrl, showName=name)
         showOc.add(CreateShowDirObject(name, key))
 
@@ -261,18 +263,82 @@ def ReturnSearchShows(url, xpath, result, showOc=[]):
     return result
 
 @route(PLUGIN_PREFIX + '/ReturnSearchHits')
-def ReturnSearchHits(url, xpath, result, directoryTitle, createDirectory=False):
+def ReturnSearchHits(url, tag, result, directoryTitle, createDirectory=False):
     if createDirectory:
         if TEXT_OA in directoryTitle:
             thumb = R(OA_ICON)
         else:
             thumb = R(ICON)
-        result.add(CreateDirObject(directoryTitle, Callback(ReturnSearchHits,url=url, xpath=xpath, result=None, directoryTitle=directoryTitle), thumb))
+        result.add(CreateDirObject(directoryTitle, Callback(ReturnSearchHits,url=url, tag=tag, result=None, directoryTitle=directoryTitle), thumb))
         return result
     else:
-        page = HTML.ElementFromURL(url)
-        epList = ObjectContainer(title1=TEXT_TITLE, title2=TEXT_SEARCH + " - " + directoryTitle)
-        return GetEpisodeObjects(epList, page.xpath(xpath), None, stripShow=False)
+        oc = ObjectContainer(title1=TEXT_TITLE, title2=TEXT_SEARCH + " - " + directoryTitle)
+        searchResult = GetSearchResult(url)[tag]
+        for hit in searchResult:
+            IsLive = 'live' in hit and hit['live'];
+            if IsLive and hit['broadcastEnded']:
+                continue;
+            # GetLiveShowTitle(article)
+            if 'title' in hit:
+                title = trim(hit['title'])
+            else:
+                title = trim(hit['name'])
+            show = None
+            if 'programTitle' in hit:
+                show = trim(hit['programTitle']).decode('utf-8')
+                try: 
+                    show = show.decode('utf-8')
+                except: 
+                    pass
+            summary = None
+            if 'description' in hit:
+                summary = String.DecodeHTMLEntities(hit['description'])
+            duration = hit['materialLength']*1000
+            air_date = None
+            if 'broadcastDate' in hit:
+                air_date = Datetime.ParseDate(hit['broadcastDate'])
+            elif 'publishDate' in hit:
+                air_date = Datetime.ParseDate(hit['publishDate'])
+            thumb = None
+            if 'imageSmall' in hit:
+                thumb = FixLink(hit['imageSmall']);
+            elif 'posterImageUrl' in hit:
+                thumb = FixLink(hit['posterImageUrl']);
+            episode = None
+            if re.search("[Aa]vsnitt +[0-9]+", title):
+                episode = int(re.sub(".*[Aa]vsnitt +([0-9]+).*", "\\1", title))
+            if summary and not episode and re.search("[Dd]el +[0-9]+", summary):
+                episode = int(re.sub(".*[Dd]el +([0-9]+).*", "\\1", summary, flags=re.S))
+            if episode and hit['season']:
+                season = int(hit['season'])
+            else:
+                season = None
+            url = FixLink(hit['contentUrl'])
+            if show and not show in title:
+                title = show + " - "+ title
+            elif re.search("^(avsnitt|del)", title, re.I) and season:
+                title = unicode("Säsong %i - %s" % (season,title));
+
+            if 'expireDate' in hit:
+                availability = Datetime.ParseDate(hit['expireDate']).date()-Datetime.Now().date()
+                summary = u'Tillgänglig: %i dagar. \n' % availability.days + summary
+
+            oc.add(EpisodeObject(
+                    url = addSamsung(url, title, show, season, episode),
+                    show = show,
+                    title = title.strip(),
+                    summary = summary,
+                    duration = duration,
+                    season = season,
+                    index = episode,
+                    thumb = thumb.replace('/small/','/medium/'),
+                    art = ThumbToArt(thumb),
+                    originally_available_at = air_date))
+        return oc
+        # epList = GetEpisodeObjects(epList, page.xpath(xpath), None, stripShow=False)
+        # sortOnAirData(epList)
+        # epList.objects.sort(key=lambda obj: obj.show)
+        # return epList
 
 def CreateDirObject(name, key, thumb=R(ICON), summary=None):
     myDir         = DirectoryObject()
@@ -558,7 +624,7 @@ def GetCategories(prevTitle=None):
         page = HTML.ElementFromURL(URL_SITE)
         articles = page.xpath("//article[contains(concat(' ',@class,' '),'play_promotion-item ')]")
         for article in articles:
-            title = article.xpath(".//img")[0].get('alt')
+            title = article.xpath(".//h2/span/text()")[0]
             url = FixLink(article.xpath(".//a")[0].get("href"))
             try:
                 thumb = R(sec2thumb[title])
