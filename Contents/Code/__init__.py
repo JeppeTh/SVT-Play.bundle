@@ -8,7 +8,7 @@ PLUGIN_PREFIX = "/video/svt"
 # URLs
 URL_SITE = "http://www.svtplay.se"
 URL_INDEX = URL_SITE + "/program"
-URL_CANNELS = URL_SITE + "/kanaler"
+URL_CHANNELS = URL_SITE + "/kanaler"
 URL_PROGRAMS = URL_SITE + "/ajax/sok/forslag.json"
 URL_SEARCH      = URL_SITE + "/sok?q=%s"
 
@@ -19,6 +19,7 @@ URL_OA_INDEX = "http://www.oppetarkiv.se/kategori/titel"
 
 #Texts
 TEXT_CHANNELS = u'Kanaler'
+TEXT_CATEGORIES = u'Kategorier'
 TEXT_INDEX_SHOWS = u'Program A-Ö'
 TEXT_PREFERENCES = u'Inställningar'
 TEXT_TITLE = u'SVT Play'
@@ -39,7 +40,7 @@ OA_ICON = 'category_oppet_arkiv.png'
 
 OA_CHUNK_SIZE = 10
 
-LATEST_FIRST = True
+LATEST_FIRST = False
 
 CACHE_1H = 60 * 60
 CACHE_1DAY = CACHE_1H * 24
@@ -115,8 +116,6 @@ def AddSections(menu):
             title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/span/text()")
             if (len(title) == 0):
                 title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/text()")
-            if (len(title) == 0):
-                continue;
             i = 0
             while i < len(title):
                 title[i] = title[i].strip()
@@ -345,8 +344,14 @@ def CreateDirObject(name, key, thumb=R(ICON), summary=None):
     return myDir
 
 def CreateShowDirObject(name, key):
-    name = name.strip()
-    return CreateDirObject(name, key, GetShowImgUrl(name), GetShowSummary(name))
+    thumb = GetShowImgUrl(name.strip())
+    return TVShowObject(key            = key,
+                        rating_key     = key,
+                        title          = name.strip(),
+                        thumb          = thumb,
+                        art            = R(ART),
+                        summary        = GetShowSummary(name)
+                        )
 
 def SearchShowTitle (query):
     return GetAllIndex(TEXT_TITLE, 
@@ -410,8 +415,8 @@ def HarvestShowData():
             d = Dict[SHOW_SUM]
             if showName in d:
                 td = Datetime.Now() - d[showName][2]
-                if td.days < 30:
-                    Log("Got cached data for %s" % showName)
+                if td.days < 7:
+                    Log("Got cached data for %s (%i)" % (showName, td.days))
                     continue
             else:
                 Log("no hit for %s" % showName)
@@ -622,10 +627,7 @@ def GetCategories(prevTitle=None):
         for article in articles:
             title = article.xpath(".//h2/span/text()")[0]
             url = FixLink(article.xpath(".//a")[0].get("href"))
-            try:
-                thumb = R(sec2thumb[title])
-            except:
-                thumb = article.xpath(".//img")[0].get('src')
+            thumb = article.xpath(".//img")[0].get('src')
             # Nasty hack for OA in categories...
             if url == URL_SITE + "/%s" % URL_OA_LABEL:
                 oc.add(DirectoryObject(key=Callback(GetOAIndex, prevTitle=prevTitle), title=title, thumb=thumb))
