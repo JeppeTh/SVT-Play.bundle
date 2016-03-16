@@ -49,13 +49,6 @@ CACHE_30DAYS = CACHE_1DAY * 30
 SHOW_SUM = "showsum"
 DICT_V = 1.2
 
-sec2thumb = {u"Kategorier": "main_kategori.png", \
-             u"Kanaler" : "main_kanaler.png", \
-             u"Live" : "main_live.png", \
-             u"Senaste program" : "main_senaste_program.png", \
-             u"Rekommenderat" : "main_rekommenderat.png"
-            }
-
 # Initializer called by the framework
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def Start():
@@ -232,9 +225,12 @@ def Search (query):
             result = ReturnSearchShows(searchUrl, result, showOc)
         return result
 
+def DecodeJson(data):
+    data = data.split('root["__svtplay"]')[1]
+    return JSON.ObjectFromString(re.sub("[^{]*(.+);$", "\\1", data))
+
 def GetSearchResult(searchUrl):
-    searchResult = HTTP.Request(searchUrl).content.split('root["__svtplay"]')[1]
-    searchResult = JSON.ObjectFromString(re.sub("[^{]*(.+);$", "\\1", searchResult))
+    searchResult = DecodeJson(HTTP.Request(searchUrl).content)
     return searchResult['context']['dispatcher']['stores']['SearchStore']
 
 def ReturnSearchShows(url, result, showOc=[]):
@@ -622,12 +618,13 @@ def GetRecommendedEpisodes(prevTitle=None):
 def GetCategories(prevTitle=None):
     try:
         oc = ObjectContainer(title1=prevTitle, title2='Kategorier')
-        page = HTML.ElementFromURL(URL_SITE)
-        articles = page.xpath("//article[contains(concat(' ',@class,' '),'play_promotion-item ')]")
-        for article in articles:
-            title = article.xpath(".//h2/span/text()")[0]
-            url = FixLink(article.xpath(".//a")[0].get("href"))
-            thumb = article.xpath(".//img")[0].get('src')
+        data = DecodeJson(HTTP.Request(URL_INDEX).content)
+        data = data["context"]["dispatcher"]["stores"]["ProgramsStore"]["categories"];
+        data.sort(key=lambda obj: obj['name'])
+        for category in data:
+            title = category['name']
+            url = FixLink(category['urlPart'])
+            thumb = FixLink(category['posterImageUrl'])
             # Nasty hack for OA in categories...
             if url == URL_SITE + "/%s" % URL_OA_LABEL:
                 oc.add(DirectoryObject(key=Callback(GetOAIndex, prevTitle=prevTitle), title=title, thumb=thumb))
