@@ -101,21 +101,13 @@ def MainMenu():
 def AddSections(menu):
 
     try:
-        pageElement = HTML.ElementFromURL(URL_SITE)
-        xpath = "//section[@class='play_videolist-group']"
-        for section in pageElement.xpath(xpath):
-            if "play_is-hidden" in section.get('class'):
-                continue
-            title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/span/text()")
-            if (len(title) == 0):
-                title = section.xpath(".//h1[contains(concat(' ',@class,' '),' play_videolist-section-header__header')]/a/text()")
-            i = 0
-            while i < len(title):
-                title[i] = title[i].strip()
-                i = i+1
-            title = unicode('/'.join(title))
-            url = FixLink(section.xpath(".//h1[@class='play_videolist-section-header__header']/./a")[0].get("href"))
-            menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, url=url, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(ICON)))
+        json = DecodeJson(HTTP.Request(URL_SITE).content)['context']['dispatcher']['stores']['StartStore']
+        for (section, data) in json.items():
+            if "Url" in section:
+                url = FixLink(json[section])
+                title = json[section.replace("Url", "Header")].strip()
+                menu.add(DirectoryObject(key=Callback(GetSectionEpisodes, url=url, prevTitle=TEXT_TITLE, title=title), title=title, thumb=R(ICON)))
+
     except Exception as e:
         Log.Exception("AddSections failed:%s" % e)
     return menu
@@ -133,6 +125,13 @@ def GetSectionEpisodes(url, prevTitle, title):
 @route(PLUGIN_PREFIX + '/GetSectionShows')
 def GetSectionShows(url, prevTitle, title):
     oc = ObjectContainer(title1=prevTitle, title2=unicode(title))
+
+    try:
+        return GetNewSectionShows(oc, url, prevTitle)
+    except Exception as e:
+        Log("GetNewSectionShows failed: %s" % e)
+        pass
+
     page = HTML.ElementFromURL(url)
 
     # If start page isn't alphabetical - we need to fetch that page to get all shows
@@ -155,6 +154,16 @@ def GetSectionShows(url, prevTitle, title):
             continue
                          
         name = article.get("data-title")
+        oc.add(CreateShowDirObject(name, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=name)))
+
+    return oc
+
+def GetNewSectionShows(oc, url, prevTitle):
+    data = DecodeJson(HTTP.Request(url).content)['context']['dispatcher']['stores']['ClusterStore']
+    
+    for item in data['titles']:
+        showUrl = FixLink(item['contentUrl'])
+        name = item['programTitle'].strip()
         oc.add(CreateShowDirObject(name, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=name)))
 
     return oc
@@ -584,18 +593,14 @@ def GetRecommendedEpisodes(prevTitle=None):
 
     oc = ObjectContainer(title1=prevTitle, title2=TEXT_RECOMMENDED)
 
-    page = HTML.ElementFromURL(URL_SITE)
-    articles = page.xpath("//section [@class='play_display-window']//article")
-    for article in articles:
-        url = RedirectedUrl(FixLink(article.xpath("./a/@href")[0]))
+    data = DecodeJson(HTTP.Request(URL_SITE).content)['context']['dispatcher']['stores']['DisplayWindowStore']['start_page']
+    for item in data:
+        url = RedirectedUrl(FixLink(item['url']))
         show = None
-        title = GetFirstNonEmptyString(article.xpath(".//h2[contains(concat(' ',@class,' '),'play_display-window__title ')]/text()"))
-
-
-        summary = GetFirstNonEmptyString(article.xpath(".//p[contains(concat(' ',@class,' '),'play_display-window__text ')]/text()"))
+        title = item['title'].strip();
+        summary = item['description'].strip();
         if summary: summary = unescapeHTML(summary)
-        # thumb = article.xpath(".//img/@data-imagename")[0].decode('utf-8') 
-        thumb = FixLink(article.xpath(".//img/@src")[0].replace("_imax", ""))
+        thumb = FixLink(item['imageMedium'].replace("_imax", ""))
         tmp = title.split(" - ", 1)
         if len(tmp) > 1:
             show = tmp[0]
@@ -652,60 +657,31 @@ def GetShowEpisodes(prevTitle=None, showUrl=None, showName=""):
 
 @route(PLUGIN_PREFIX + '/GetChannels')
 def GetChannels(prevTitle):
-    page = HTML.ElementFromURL(URL_CHANNELS, cacheTime = 0)
-    shows = page.xpath("//div[contains(concat(' ',@class,' '),'play_channels__active-video-info')]")
-    thumbBase = "/public/images/channels/backgrounds/%s-background.jpg"
+    data = DecodeJson(HTTP.Request(URL_CHANNELS, cacheTime = 0).content)
+    data = data['context']['dispatcher']['stores']['ScheduleStore']['channels']
+    thumbBase = "/assets/images/channels/posters/%s-300.png"
     channelsList = ObjectContainer(title1=prevTitle, title2=TEXT_CHANNELS)
 
-    for show in shows:
-        channel = show.get("data-channel")
-        if channel == None:
-            continue
+    for show in data:
+        channel = show['title'].strip()
         url = URL_CHANNELS + '/' + channel
-        desc = None
-        thumb = None
-        duration = None
-
-        if thumb == None:
-            thumb = thumbBase % channel
-
-        title = show.xpath(".//h1/text()")[0]
-
-        timestring = ""
-# Try to convert the time values to something readable
-        try:
-            timeDiv = show.xpath(".//div[@class='play_progressbar__value--alt play_js-schedule__progressbar__progress playJsSchedule-Progress']")[0]
-            starttime = timeDiv.get("data-starttime")
-            endtime = timeDiv.get("data-endtime")
-            s = int(starttime)/1000
-            e = int(endtime)/1000
-            ss = time.strftime('%H:%M', time.localtime(s))
-            es = time.strftime('%H:%M', time.localtime(e))
-            timestring = " - (%s - %s)" % (ss, es)
-        except:
-            pass
-
-        try:
-            desc = show.xpath(".//p[contains(concat(' ',@class,' '),'-show-description')]/text()")[0].strip()
-            desc = unescapeHTML(desc)
-        except:
-            pass
-
-        try:
-            duration = dataLength2millisec(show.xpath(".//span[contains(concat(' ',@class,' '),'-show-duration')]/text()")[0].strip())
-        except:
-            pass
-
+        thumb = thumbBase % channel
+        Log("JTDEBUG thumb:%r" % thumb)
         if 'svt' in channel:
             channel = channel.upper()
         else:
             channel = channel.capitalize()
 
+        title = show['schedule'][0]['title'].strip()
+        starttime = Datetime.ParseDate(show['schedule'][0]['broadcastStartTime']);
+        endtime = Datetime.ParseDate(show['schedule'][0]['broadcastEndTime']);
+        timestring = " - (%s - %s)" % (starttime.strftime('%H:%M'), endtime.strftime('%H:%M'))
+        desc = unescapeHTML(show['schedule'][0]['description'].strip())
         show = EpisodeObject(
                 url = FixLink(url),
                 title = channel + " - " + title + timestring,
                 summary = desc,
-                duration = duration,
+                duration = int((endtime-starttime).total_seconds()*1000),
                 thumb = FixLink(thumb.replace('/small/','/medium/'))
                 )
         channelsList.add(show)
