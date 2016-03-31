@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*
 import re, htmlentitydefs, datetime, time
+from datetime import datetime
 # Global constants
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 VERSION = "9"
@@ -48,6 +49,31 @@ CACHE_30DAYS = CACHE_1DAY * 30
 
 SHOW_SUM = "showsum"
 DICT_V = 1.2
+
+DAYS = [
+    unicode("Måndag"),
+    unicode("Tisdag"),
+    unicode("Onsdag"),
+    unicode("Torsdag"),
+    unicode("Fredag"),
+    unicode("Lördag"),
+    unicode("Söndag")
+]
+
+MONTHS = [
+    unicode("Jan"),
+    unicode("Feb"),
+    unicode("Mar"),
+    unicode("Apr"),
+    unicode("Maj"),
+    unicode("Jun"),
+    unicode("Jul"),
+    unicode("Aug"),
+    unicode("Sep"),
+    unicode("Okt"),
+    unicode("Nov"),
+    unicode("Dec")
+]
 
 # Initializer called by the framework
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -116,11 +142,21 @@ def AddSections(menu):
 def GetSectionEpisodes(url, prevTitle, title):
     oc = ObjectContainer(title1=unicode(prevTitle), title2=unicode(title))
 
-    pageElement = HTML.ElementFromURL(url, cacheTime=0)
-    articles = pageElement.xpath(".//article")
-    oc = GetEpisodeObjects(oc, articles, showName=None, isLive="/live" in url)
+    try:
+        return DecodeSection(oc, url)
+    except Exception as e:
+        Log.Exception("JSON failed:%s" % e)
 
-    return oc
+        pageElement = HTML.ElementFromURL(url, cacheTime=0)
+        articles = pageElement.xpath(".//article")
+        oc = GetEpisodeObjects(oc, articles, showName=None, isLive="/live" in url)
+
+        return oc
+
+def DecodeSection(oc, url):
+    items = DecodeJson(HTTP.Request(url, cacheTime=0).content)['context']['dispatcher']['stores']['GridStore']['content']
+    return DecodeItems(oc, items)
+
 
 @route(PLUGIN_PREFIX + '/GetSectionShows')
 def GetSectionShows(url, prevTitle, title):
@@ -277,67 +313,78 @@ def ReturnSearchHits(url, tag, result, directoryTitle, createDirectory=False):
     else:
         oc = ObjectContainer(title1=TEXT_TITLE, title2=TEXT_SEARCH + " - " + directoryTitle)
         searchResult = GetSearchResult(url)[tag]
-        for hit in searchResult:
-            IsLive = 'live' in hit and hit['live'];
-            if IsLive and hit['broadcastEnded']:
-                continue;
-            # GetLiveShowTitle(article)
-            if 'title' in hit:
-                title = trim(hit['title'])
-            else:
-                title = trim(hit['name'])
-            show = None
-            if 'programTitle' in hit:
-                show = trim(hit['programTitle']).decode('utf-8')
-                try: 
-                    show = show.decode('utf-8')
-                except: 
-                    pass
-            summary = None
-            if 'description' in hit:
-                summary = String.DecodeHTMLEntities(hit['description'])
-            duration = hit['materialLength']*1000
-            air_date = None
-            if 'broadcastDate' in hit:
-                air_date = Datetime.ParseDate(hit['broadcastDate'])
-            elif 'publishDate' in hit:
-                air_date = Datetime.ParseDate(hit['publishDate'])
-            thumb = None
-            if 'imageSmall' in hit:
-                thumb = FixLink(hit['imageSmall']);
-            elif 'posterImageUrl' in hit:
-                thumb = FixLink(hit['posterImageUrl']);
-            episode = None
-            if re.search("[Aa]vsnitt +[0-9]+", title):
-                episode = int(re.sub(".*[Aa]vsnitt +([0-9]+).*", "\\1", title))
-            if summary and not episode and re.search("[Dd]el +[0-9]+", summary):
-                episode = int(re.sub(".*[Dd]el +([0-9]+).*", "\\1", summary, flags=re.S))
-            if episode and hit['season']:
-                season = int(hit['season'])
-            else:
-                season = None
-            url = FixLink(hit['contentUrl'])
-            if show and not show in title:
-                title = show + " - "+ title
-            elif re.search("^(avsnitt|del)", title, re.I) and season:
-                title = unicode("Säsong %i - %s" % (season,title));
+        return DecodeItems(oc, searchResult)
 
-            if 'expireDate' in hit:
-                availability = Datetime.ParseDate(hit['expireDate']).date()-Datetime.Now().date()
-                summary = u'Tillgänglig: %i dagar. \n' % availability.days + summary
+def DecodeItems(oc, items):
+    for item in items:
+        IsLive = 'live' in item and item['live'];
+        if IsLive and item['broadcastEnded']:
+            continue;
+        if 'title' in item:
+            title = trim(item['title'])
+        else:
+            title = trim(item['name'])
+        show = None
+        if 'programTitle' in item:
+            show = trim(item['programTitle']).decode('utf-8')
+            try: 
+                show = show.decode('utf-8')
+            except: 
+                pass
+        summary = None
+        if 'description' in item:
+            summary = String.DecodeHTMLEntities(item['description'])
+        duration = item['materialLength']*1000
+        air_date = None
+        if 'broadcastDate' in item:
+            air_date = Datetime.ParseDate(item['broadcastDate'])
+        elif 'publishDate' in item:
+            air_date = Datetime.ParseDate(item['publishDate'])
+        thumb = None
+        if 'imageSmall' in item:
+            thumb = FixLink(item['imageSmall']);
+        elif 'posterImageUrl' in item:
+            thumb = FixLink(item['posterImageUrl']);
+        episode = None
+        if re.search("[Aa]vsnitt +[0-9]+", title):
+            episode = int(re.sub(".*[Aa]vsnitt +([0-9]+).*", "\\1", title))
+        if summary and not episode and re.search("[Dd]el +[0-9]+", summary):
+            episode = int(re.sub(".*[Dd]el +([0-9]+).*", "\\1", summary, flags=re.S))
+        if episode and item['season']:
+            season = int(item['season'])
+        else:
+            season = None
+        url = FixLink(item['contentUrl'])
+        if show and not show in title:
+            title = show + " - "+ title
+        elif re.search("^(avsnitt|del)", title, re.I) and season:
+            title = unicode("Säsong %i - %s" % (season,title));
 
-            oc.add(EpisodeObject(
-                    url = addSamsung(url, title, show, season, episode),
-                    show = show,
-                    title = title.strip(),
-                    summary = summary,
-                    duration = duration,
-                    season = season,
-                    index = episode,
-                    thumb = thumb.replace('/small/','/medium/'),
-                    art = ThumbToArt(thumb),
-                    originally_available_at = air_date))
-        return oc
+        if IsLive:
+            title = GetLiveShowTitle(title, air_date)
+
+        if not summary:
+            summary = ""
+        if 'expireDate' in item:
+            availability = Datetime.ParseDate(item['expireDate']).date()-Datetime.Now().date()
+            summary = u'Tillgänglig: %i dagar. \n' % availability.days + summary
+
+        oc.add(EpisodeObject(
+                url = url,
+                show = show,
+                title = title.strip(),
+                summary = summary,
+                duration = duration,
+                season = season,
+                index = episode,
+                thumb = thumb.replace('/small/','/medium/'),
+                art = ThumbToArt(thumb),
+                originally_available_at = air_date))
+    return oc
+# epList = GetEpisodeObjects(epList, page.xpath(xpath), None, stripShow=False)
+# sortOnAirData(epList)
+# epList.objects.sort(key=lambda obj: obj.show)
+# return epList
 
 def CreateDirObject(name, key, thumb=R(ICON), summary=None):
     myDir         = DirectoryObject()
@@ -687,7 +734,23 @@ def GetChannels(prevTitle):
         channelsList.add(show)
     return channelsList
 
-def GetLiveShowTitle(a):
+# 23:30: Svt Nyheter
+# Imorgon 07:00: Morgonshowen
+# S�n 13 mar 14:25: Fotboll
+def GetLiveShowTitle(title, air_date):
+    t = datetime.today()
+    today = "%04i%02i%02i" % (t.year, t.month, t.day)
+    t = t + Datetime.Delta(days = 1)
+    tomorrow = "%04i%02i%02i" % (t.year, t.month, t.day)
+    air_day = "%04i%02i%02i" % (air_date.year,air_date.month, air_date.day)
+    title = "%02i:%02i: %s" % (air_date.hour, air_date.minute, title)
+    if air_day == tomorrow:
+        title = "Imorgon " + title
+    elif air_day != today:
+        title = "%s %02i %s " % (DAYS[air_date.weekday()], air_date.day, MONTHS[air_date.month-1], )+ title
+    return title
+
+def GetOldLiveShowTitle(a):
     times = a.xpath(".//time/text()") # obsolete xpath?
     timeText = " - ".join(times)
     showName = a.xpath(".//span[@class='play_videolist-element__title-text']/text()")[0]
@@ -708,7 +771,7 @@ def GetEpisodeObjects(oc, articles, showName, stripShow=False, titleFilter=None,
             if isLive or IsLive(article):
                 if article.get("data-broadcastended") == "true":
                     continue
-                title = GetLiveShowTitle(article)
+                title = GetOldLiveShowTitle(article)
             else:
                 title = article.get("data-title")
 
