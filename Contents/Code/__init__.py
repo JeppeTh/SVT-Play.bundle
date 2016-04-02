@@ -200,7 +200,8 @@ def GetNewSectionShows(oc, url, prevTitle):
     for item in data['titles']:
         showUrl = FixLink(item['contentUrl'])
         name = item['programTitle'].strip()
-        oc.add(CreateShowDirObject(name, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=name)))
+        thumb = FixLink(item['imageSmall'])
+        oc.add(CreateShowDirObject(name, key=Callback(GetShowEpisodes, prevTitle=prevTitle, showUrl=showUrl, showName=name), thumb=thumb))
 
     return oc
 
@@ -317,9 +318,7 @@ def ReturnSearchHits(url, tag, result, directoryTitle, createDirectory=False):
 
 def DecodeItems(oc, items):
     for item in items:
-        IsLive = 'live' in item and item['live'];
-        if IsLive and item['broadcastEnded']:
-            continue;
+        IsLive = 'live' in item and item['live'] and not item['broadcastEnded'];
         if 'title' in item:
             title = trim(item['title'])
         else:
@@ -395,8 +394,9 @@ def CreateDirObject(name, key, thumb=R(ICON), summary=None):
     myDir.art     = R(ART)
     return myDir
 
-def CreateShowDirObject(name, key):
-    thumb = GetShowImgUrl(name.strip())
+def CreateShowDirObject(name, key, thumb=None):
+    if not thumb:
+        thumb = GetShowImgUrl(name.strip())
     return TVShowObject(key            = key,
                         rating_key     = key,
                         title          = name.strip(),
